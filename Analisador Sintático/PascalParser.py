@@ -1,5 +1,5 @@
 from declarations import parse_variable_declarations, parse_variable_declaration, parse_subprogram_declarations
-from expressions import parse_expression, parse_simple_expression, parse_term, parse_factor
+
 
 class PascalParser:
     def __init__(self, tokens):
@@ -50,20 +50,18 @@ class PascalParser:
             # Não precisa remover tokens da pilha, pois a redução é feita especificamente para os tokens passados
             
         elif rule == 'subprogram_declaration':
-            # Processo similar para declarações de subprogramas
-            subprogram_declaration = []
-            while self.stack and self.stack[-1]['Token'] not in ['procedure']:
-                subprogram_declaration.insert(0, self.stack.pop())
-            self.debug_print(f"Declaração de subprograma reduzida: {subprogram_declaration}")
+            self.debug_print(f"Declaração de subprograma reduzida: {tokens}")
             # Adicionar lógica para análise de subprogramas
             
         elif rule == 'compound_command':
             # Redução para comandos compostos
-            compound_command = []
-            while self.stack and self.stack[-1]['Token'] not in ['begin']:
-                compound_command.insert(0, self.stack.pop())
-            self.debug_print(f"Comando composto reduzido: {compound_command}")
-            # Análise de comandos compostos
+            self.debug_print(f"Comando composto reduzido: {tokens}")
+
+        elif rule == 'simple_expression':
+            self.debug_print(f"Expressão simples reduzida: {tokens}")
+
+        elif rule == 'expression':
+            self.debug_print(f"Expressão reduzida: {tokens}")
  
     def parse_procedure_activation(self):
         self.shift()  # Shift para o identificador do procedimento
@@ -81,22 +79,34 @@ class PascalParser:
 
     def parse_compound_command(self):
         if self.current_token['Token'] == 'begin':
-            self.shift()  # Shift para 'begin'
+            self.shift()
             self.next_token()
-            self.parse_commands_optional()  # Analisa os comandos dentro do bloco
+            self.parse_commands_optional()
             if self.current_token['Token'] == 'end':
-                self.shift()  # Shift para 'end'
+                self.shift()
                 self.next_token()
-                if self.current_token['Token'] == '.':
-                    self.shift()  # Final do programa
-                    # Aqui, você pode verificar se a pilha está vazia ou fazer outras verificações finais
+                if self.current_token and self.current_token['Token'] == '.':
+                    self.shift()  # Trata o ponto final corretamente.
+                    if self.current_token is None:
+                        # Verifica se realmente chegamos ao fim dos tokens
+                        return
+                    else:
+                        raise SyntaxError("No additional tokens expected after program end.")
                 else:
-                    pass
-                    # Continua a análise se 'end' não for o fim do programa
+                    raise SyntaxError("Expected '.' at the end of the program")
             else:
-                raise SyntaxError("Expected 'end' to close 'begin' block")
+                raise SyntaxError("Expected 'end'")
         else:
-            raise SyntaxError("Expected 'begin' at the start of compound command")
+            raise SyntaxError("Expected 'begin'")
+
+
+
+    def set_accept_state(self):
+        self.is_accept_state = True
+
+    def is_accept_state(self):
+        return self.is_accept_state
+
 
     def next_token(self):
         self.index += 1
@@ -113,29 +123,21 @@ class PascalParser:
     def parse_commands_optional(self):
         while self.current_token and self.current_token['Token'] != 'end':
             self.parse_command()
-            
-            # Após parsear um comando, verifica se o próximo token é um ';' ou 'end'
+
+            # Ignora comentários que podem aparecer entre comandos
+            while self.current_token and self.current_token['Token'].startswith('{'):
+                self.shift()  # Ignora o comentário
+                self.next_token()
+
             if self.current_token and self.current_token['Token'] == ';':
                 self.shift()  # Consome o ';'
                 self.next_token()
-            elif self.current_token and self.current_token['Token'] != 'end' and self.current_token['Token'] != '.' :
-                # Se o token atual não for ';' e o próximo token não for 'end', lança um erro
-                raise SyntaxError("Expected ';' or 'end' after command.")
+                # Novamente, ignora comentários que podem aparecer após ';'
+                while self.current_token and self.current_token['Token'].startswith('{'):
+                    self.shift()  # Ignora o comentário
+                    self.next_token()
 
 
-
-    def parse_compound_command(self):
-        if self.current_token['Classificação'] == 'Palavra reservada' and self.current_token['Token'] == 'begin':
-            self.shift()  # Shift para 'begin'
-            self.next_token()
-            self.parse_commands_optional()  # Analisa comandos opcionais dentro do bloco
-            if self.current_token['Classificação'] == 'Palavra reservada' and self.current_token['Token'] == 'end':
-                self.shift()  # Shift para 'end'
-                self.reduce('compound_command')  # Aplica regra de redução para comando composto
-            else:
-                raise SyntaxError("Expected 'end' at the end of compound command")
-        else:
-            raise SyntaxError("Expected 'begin' at the start of compound command")
 
     def parse_arguments(self):
         if self.current_token['Token'] == '(':
@@ -155,12 +157,18 @@ class PascalParser:
 
     def parse_command(self):
         if self.current_token['Classificação'] == 'Identificador':
-            # Verifica o próximo token sem consumi-lo.
+            print("aa")
+            # Olha à frente para verificar se os próximos tokens indicam uma instrução de atribuição.
             lookahead_token = self.tokens[self.index + 1] if self.index + 1 < len(self.tokens) else None
-
-            if lookahead_token and lookahead_token['Token'] == ':=':
+            print(lookahead_token)
+            if lookahead_token['Token'] == ':':
+                # Se o próximo token é ':', verifica se o subsequente é '=', indicando uma atribuição.
+                self.parse_assignment_statement()
+            elif lookahead_token['Token'] == ':=':
+                # Se o próximo token é ':=', então a instrução de atribuição começa com o identificador atual.
                 self.parse_assignment_statement()
             else:
+                # Outros casos para identificadores que não são parte de uma atribuição (por exemplo, chamada de procedimento).
                 self.parse_procedure_call()
         elif self.current_token['Token'] == 'if':
             self.parse_if_statement()
@@ -168,18 +176,28 @@ class PascalParser:
             self.parse_while_statement()
         else:
             raise SyntaxError(f"Unexpected command: {self.current_token['Token']}")
-
-                
+        
     def parse_assignment_statement(self):
-        self.shift()  # Shift para o identificador
-        self.next_token()
-        if self.current_token['Token'] == ':=':
-            self.shift()  # Shift para ':='
+        # Verifica se o token atual é um identificador, o que é esperado no início de uma instrução de atribuição.
+        if self.current_token['Classificação'] == 'Identificador':
+            
+            left_side_token = self.current_token  # Guarda o token do lado esquerdo da atribuição.
+            self.shift()  # Shift para o identificador.
             self.next_token()
-            self.parse_expression()  # Analisa a expressão à direita do ':='
-            self.reduce('assignment_statement')  # Aplica redução para a instrução de atribuição
+            # Verifica se os próximos dois tokens formam o operador de atribuição ':='.
+            if self.current_token['Token'] == ':=':
+                print('entroi')
+                self.shift()  # Shift para ':='.
+                self.next_token()
+                # Analisa a expressão do lado direito da atribuição.
+                self.parse_expression()
+                # Após analisar a expressão, aplica a redução para a instrução de atribuição.
+                self.reduce('assignment_statement', [left_side_token])
+            else:
+                raise SyntaxError("Invalid syntax in assignment statement. Expected ':='.")
         else:
-            raise SyntaxError("Expected ':=' in assignment statement")
+            raise SyntaxError("Expected an identifier at the beginning of an assignment statement.")
+
 
         
     def parse_parameter_list(self):
@@ -242,4 +260,68 @@ class PascalParser:
         else:
             raise SyntaxError("Expected 'do' after while condition")
         self.reduce('while_statement')
+
+    def parse_simple_expression(self):
+        temp_tokens = []
+        # Esta função analisa uma expressão simples, que pode conter operadores aditivos
+        if self.current_token['Classificação'] in ['Número inteiro', 'Número real', 'Identificador']:
+            temp_tokens.append(self.current_token)
+            self.shift()  # Consumir o número ou identificador
+            self.next_token()
+        while self.current_token['Classificação'] in ['Operador aditivo', 'Operador multiplicativo']:
+            temp_tokens.append(self.current_token)
+            self.shift()  # Consumir o operador
+            self.next_token()
+            if self.current_token['Classificação'] in ['Número inteiro', 'Número real', 'Identificador']:
+                temp_tokens.append(self.current_token)
+                self.shift()  # Consumir o próximo número ou identificador
+                self.next_token()
+        self.reduce('simple_expression', temp_tokens)
+
+
+    def parse_expression(self):
+        temp_tokens = []
+        # Esta função analisa uma expressão, que pode ser uma expressão simples ou uma expressão com um operador relacional
+        self.parse_simple_expression()
+        if self.current_token['Classificação'] == 'Operador relacional':
+            temp_tokens.append(self.current_token)
+            self.shift()  # Consumir o operador relacional
+            self.next_token()
+            self.parse_simple_expression()
+        self.reduce('expression', temp_tokens)
+
+    def parse_term(self):
+        temp_tokens = []
+        # Esta função analisa um termo, que pode ser um fator ou uma sequência de fatores multiplicados ou divididos
+        self.parse_factor()
+        while self.current_token['Classificação'] == 'Operador multiplicativo':
+            temp_tokens.append(self.current_token)
+            self.shift()  # Consumir o operador multiplicativo
+            self.next_token()
+            self.parse_factor()
+        self.reduce('term', temp_tokens )
+
+
+    def parse_factor(self):
+        temp_tokens = []
+        # Esta função analisa um fator, que pode ser um número, uma variável ou uma expressão entre parênteses
+        if self.current_token['Classificação'] in ['Número inteiro', 'Número real', 'Identificador']:
+            temp_tokens.append(self.current_token)
+            self.shift()  # Consumir o número, real ou identificador
+            
+        elif self.current_token['Token'] == '(':
+            temp_tokens.append(self.current_token)
+            self.shift()  # Consumir '('
+            self.next_token()
+            self.parse_expression()
+            if self.current_token['Token'] == ')':
+                temp_tokens.append(self.current_token)
+                self.shift()  # Consumir ')'
+                self.next_token()
+            else:
+                raise SyntaxError("Esperado ')' após a expressão")
+        else:
+            raise SyntaxError("Fator inválido")
+        self.reduce('factor', temp_tokens)
+
 
